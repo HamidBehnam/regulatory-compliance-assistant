@@ -1,5 +1,5 @@
 [project]
-name = "regulatory-rag"
+name = "regulatory-compliance-assistant"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
