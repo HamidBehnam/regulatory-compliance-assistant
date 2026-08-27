@@ -1,10 +1,14 @@
 [project]
 name = "regulatory-compliance-assistant"
 version = "0.1.0"
-description = "Add your description here"
+description = "Retrieval over federal AML regulations (31 CFR Chapter X)"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.2",
+    "openai>=3.5.0",
+    "pydantic>=2.13.4",
+]
 
 [dependency-groups]
 dev = [

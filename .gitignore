@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Secrets
+.env
+
+# Generated indexes (rebuild with `uv run --env-file .env index.py <strategy>`)
+data/*.jsonl
+
+# Tooling
+.ruff_cache
