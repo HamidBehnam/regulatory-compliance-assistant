@@ -1,92 +1,47 @@
-"""Turning text into vectors, behind an interface.
-
-The interface is the point. Every implementation is one method — take a list
-of strings, return a list of vectors, same order — so swapping providers to
-compare them later is a configuration change rather than a rewrite. The
-comparison table is the artifact worth having; whichever model happens to win
-is not.
+"""Text to vectors, via the OpenAI embeddings endpoint.
 
 Anthropic does not serve an embedding model, so this half of the system talks
-to a different provider than the rest of it. That is worth knowing before you
-design around a single vendor.
-
-One rule the interface cannot enforce and the caller must not break: chunks and
-queries have to go through the *same* model. Different models produce different
-vector spaces, and a distance measured between two of them is a number with no
-meaning rather than an error. The index header exists to catch that.
+to a different provider than the rest of it.
 """
 
-from typing import Protocol
+from functools import cache
 
-from openai import OpenAIError
+from openai import OpenAI, OpenAIError
 
-from clients import get_openai_client
-from config import EMBEDDING_BATCH_SIZE, EMBEDDING_MODEL
+from config import EMBEDDING_MODEL
 from errors import EmbeddingUnavailable
 
+# Inputs per request. This is batching, not concurrency: one sequential HTTP
+# call carrying a list, well inside the endpoint's per-call token ceiling.
+_BATCH_SIZE = 128
 
-class Embedder(Protocol):
-    """Anything that can turn text into vectors."""
-
-    @property
-    def model(self) -> str:
-        """Identifier recorded in the index, and checked before a query runs."""
-        ...
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed ``texts``, returning one vector each, in the same order."""
-        ...
+# Applied by the SDK with exponential backoff for 429/5xx and connection errors.
+_MAX_RETRIES = 3
 
 
-class OpenAIEmbedder:
-    """Embeds via the OpenAI embeddings endpoint.
+def embed(texts: list[str]) -> list[list[float]]:
+    """Embed ``texts``, returning one vector each, in input order."""
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), _BATCH_SIZE):
+        vectors.extend(_embed_batch(texts[start : start + _BATCH_SIZE]))
+    return vectors
 
-    Requests are batched — one HTTP call carrying many inputs — which is not
-    the same thing as concurrency. There is one request in flight at a time and
-    no ordering to reason about; it is just the endpoint's own list-shaped API
-    used as intended, and it lives entirely behind ``embed``.
-    """
 
-    def __init__(
-        self, *, model: str = EMBEDDING_MODEL, batch_size: int = EMBEDDING_BATCH_SIZE
-    ) -> None:
-        self._model = model
-        self._batch_size = batch_size
+@cache
+def _client() -> OpenAI:
+    """One connection pool per process. The SDK reads OPENAI_API_KEY itself."""
+    return OpenAI(max_retries=_MAX_RETRIES)
 
-    @property
-    def model(self) -> str:
-        return self._model
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed ``texts`` in batches.
+def _embed_batch(batch: list[str]) -> list[list[float]]:
+    try:
+        response = _client().embeddings.create(model=EMBEDDING_MODEL, input=batch)
+    except OpenAIError as error:
+        raise EmbeddingUnavailable(
+            f"could not embed a batch of {len(batch)} with {EMBEDDING_MODEL}"
+        ) from error
 
-        Args:
-            texts: Strings to embed. Empty list returns an empty list.
-
-        Returns:
-            One vector per input, in input order.
-
-        Raises:
-            EmbeddingUnavailable: The API was unreachable or kept failing.
-        """
-        vectors: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            vectors.extend(self._embed_batch(texts[start : start + self._batch_size]))
-        return vectors
-
-    def _embed_batch(self, batch: list[str]) -> list[list[float]]:
-        """Embed one batch, restoring input order from the response."""
-        try:
-            response = get_openai_client().embeddings.create(
-                model=self._model, input=batch
-            )
-        except OpenAIError as error:
-            raise EmbeddingUnavailable(
-                f"could not embed a batch of {len(batch)} with {self._model}"
-            ) from error
-
-        # The response carries an explicit `index` per item and is not
-        # documented to arrive in input order. Zipping against the inputs would
-        # therefore misattribute every vector, silently and without any symptom
-        # a test would catch — the vectors are all valid, just on the wrong text.
-        return [item.embedding for item in sorted(response.data, key=lambda i: i.index)]
+    # The response is not documented to arrive in input order and carries an
+    # explicit index per item. Zipping against the inputs would misattribute
+    # every vector — all of them valid, all of them on the wrong text.
+    return [item.embedding for item in sorted(response.data, key=lambda i: i.index)]
