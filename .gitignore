@@ -1,3 +1,10 @@
+# Intellij
+/.idea
+
+# VSCode
+/.vscode/*
+!/.vscode/launch.json
+
 # Python-generated files
 __pycache__/
 *.py[oc]

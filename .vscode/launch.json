@@ -1,0 +1,24 @@
+{
+    // Both index.py and evaluate.py default to the "fixed" strategy with no
+    // args, so "Current File" runs them as-is. search.py needs a query.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Debug search.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/search.py",
+            "args": ["What is the SAR filing threshold for a bank?"],
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
