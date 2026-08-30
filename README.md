@@ -6,6 +6,25 @@ Act), built from parts rather than a framework.
 Two chunking strategies are indexed and scored side by side. Source documents
 are cached under `data/raw/`, so only the embedding calls hit the network.
 
+Measured over ten hand-labelled questions at k=5, `text-embedding-3-small`,
+2026-08-01 edition:
+
+| | `fixed` (1000/200) | `structural` (max 6000) |
+|---|---|---|
+| chunks | 570 | 284 |
+| recall@5 | 10/10 | 10/10 |
+| recall@1 | 10/10 | 9/10 |
+| MRR | 1.000 | 0.950 |
+| distinct sections in top-5 chunks | 2.6 | 2.9 |
+
+**Null result: structure-aware chunking did not improve any measured metric, and
+was marginally worse at rank 1.** recall@5 is saturated for both. The evaluation
+set is not strong enough to separate the two — every question names its regulated
+entity verbatim, and no metric here looks below the first hit. That blind spot
+hides a real difference: on the money-services-business question `fixed` returns a
+*bank* section at rank 5 and `structural` returns none, which no number above
+moves. See `docs/walkthrough.md` §1 and §4.8.
+
 ```
 uv run --env-file .env index.py structural
 uv run --env-file .env evaluate.py structural

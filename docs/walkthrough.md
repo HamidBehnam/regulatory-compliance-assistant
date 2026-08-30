@@ -58,7 +58,7 @@ They need three things back, and all three are load-bearing:
 3. **The date the text was in effect.** Regulations change. An answer without an as-of
    date is not a wrong answer; it is not an answer.
 
-### The failure this project exists to expose
+### The failure this project exists to expose — predicted, and not observed
 
 Here are the two sections that govern suspicious activity reports, side by side:
 
@@ -76,42 +76,168 @@ The two sections run to eight and nine thousand characters respectively. They ar
 near-identical boilerplate. Across their full length they differ in essentially two
 things: the noun naming the regulated entity, and the dollar figure.
 
-Now consider what a naive retrieval system does with the MSB question. It splits every
+**The prediction this project was built on.** A naive retrieval system splits every
 section into fixed-width windows of text and embeds each window. A window from the middle
-of § 1020.320 contains no part heading, no section number, and often not even the word
-"bank" — the boilerplate at that depth talks about "the financial institution" and
-"the transaction." A window from the middle of § 1022.320 looks the same. The query
-embedding cannot tell them apart, because there is nothing in either vector that
-distinguishes them.
+of § 1020.320 contains no part heading and no section number — the boilerplate at that
+depth, the argument went, talks about "the financial institution" and "the transaction."
+A window from the middle of § 1022.320 looks the same. The query embedding cannot tell
+them apart, so the MSB question returns § 1020.320: real federal regulation, a real
+citation, formatting identical to a correct answer, and $5,000 where the correct answer
+for this user is $2,000. Nothing fails, no exception, no low-confidence score, and the
+user files — or does not file — accordingly.
 
-So the system returns § 1020.320 — predicted from the mechanism, not measured; see the
-note at the end of this section. The text is real federal regulation. The citation is a
-real citation. The formatting is identical to a correct answer. And it says $5,000 when
-the correct answer for this user is $2,000.
+**That did not happen.** The prediction was wrong, and it was wrong in a way this
+document could have caught before the embedding key ever worked.
 
-**Nothing in the system fails.** No exception, no empty result, no low-confidence score.
-The user reads a plausible passage of regulatory text about the wrong kind of financial
-institution and files — or does not file — accordingly. Under-filing a SAR is a Bank
-Secrecy Act violation; the enforcement penalties are civil and, for willful violations,
-criminal.
+Measured, on the `fixed` index, for *"What is the SAR filing threshold for a money
+services business?"*. The two rankings show different things and have to be read
+separately.
 
-That is the shape of every serious failure in this codebase: **plausible-looking wrong
-output, produced by code that ran without error.** The design of the system, and the
-disproportionate length of section 4 below, follow from that.
+**The raw chunk ranking** — what the embedding actually scored highest, before
+`store.search` collapses to one chunk per section (3.7) — is § 1022.320 four times, then
+§ 1022.380. No part-1020 chunk appears in it at all. So the top of the list was already
+correct on the vectors alone: the collapse did not rescue a correct answer from a crowded
+one, and § 1022.320 is returned first by both strategies.
+
+**The collapsed list** — what `search.py` actually prints — is § 1022.320, § 1022.380,
+§ 1022.300, § 1022.500, and then, **at rank 5, § 1020.320**. Chunk `1020.320#4`, score
+0.565, path `(no heading in the embedded text)`, opening on paragraph (d): *"Retention of
+records. A bank shall maintain a copy of any SAR filed … for a period of five years from
+the date of filing the SAR."* That is a passage about **banks**, in a results list for a
+question about money services businesses, carrying no heading to warn the reader — the
+predicted failure, in the predicted form, produced by the predicted mechanism.
+
+So the honest statement is narrower than either "it happened" or "it did not." **The
+mechanism is real but far weaker than section 1 originally claimed.** It was predicted to
+put § 1020.320 *first*, displacing the correct answer and handing the user $5,000 in place
+of $2,000. What it actually does is put § 1020.320 *fifth*, beneath four correct part-1022
+results, where it is the last item of a list whose first item already answers the question.
+That is a wrong entry in a results list, not a wrong answer.
+
+The gap between those two outcomes is the whole finding, and it is why the raw ranking is
+worth printing beside the collapsed one. The raw ranking says the embedding was never
+confused about the entity. The collapsed list says that once the four best chunks of the
+correct section are deduplicated down to one, a bank chunk is close enough to be the fifth
+distinct section in a 117-section corpus. Both are true, and a document that reports only
+one of them is misleading in one direction or the other.
+
+For completeness, because it is the comparison this project exists to make: under
+`structural` the same query returns § 1022.320, § 1022.380, § 1022.315, § 1022.312 and
+§ 1022.300 — **five part-1022 sections and no bank section anywhere in the list.** On this
+one question, the heading path does exactly what 3.4.2 says it does. No metric in the
+harness can see it, because the entry it removes sits below a rank that was already a hit.
+
+#### Why the prediction was wrong
+
+The claim was that middle windows contain nothing to distinguish the two sections. The
+disconfirming evidence is three lines above the claim, inside this document's own
+quotation of § 1022.320:
+
+> … conducted or attempted by, at, or through a **money services business** …
+
+The entity name is not confined to the heading. It is in the body text, and it is in the
+body text throughout. Counted over the cached corpus:
+
+| Section | Entity term in body | Fixed-size windows containing it |
+|---|---|---|
+| § 1020.320 | "bank" — 42 occurrences | **10 of 10** |
+| § 1022.320 | "money services business" — 36 occurrences | **12 of 12** |
+
+Every window of both sections names its own regulated entity. There was never a window
+that "often not even" contained the word. The regulation restates who it binds in nearly
+every operative sentence, because that is how regulatory drafting works: statutory text
+repeats the defined term rather than pronominalising it, precisely so a paragraph read
+alone is unambiguous. The drafting convention that makes the CFR verbose is the same
+convention that makes it chunk well — and the argument above assumed the opposite of the
+thing that makes this corpus worth using.
+
+The reasoning error is worth more than the failed prediction. It was **an assumption
+about what the source text contains, never checked against the source text.** Every other
+claim in this document — corpus counts, chunk counts, the label histogram in 4.3 — was
+produced by running something over the corpus. This one was produced by imagining what
+the corpus looked like, it sat in section 1 through an entire build and an audit, and a
+single `grep` would have killed it at any point.
+
+There is a second, independent reason the failure could not have appeared here:
+**the evaluation questions name the entity.** *"What is the SAR filing threshold for a
+money services business?"* contains verbatim the phrase the regulation uses 36 times in
+the body of the very section it should return. That is strong lexical signal, and no
+chunking strategy has to work for it to survive into the embedding. A question set built
+this way cannot test entity disambiguation whatever the chunker does — see 4.8.
+
+What is retracted is the specific claim that *this* corpus and *this* chunker produce the
+confusion. The failure mode as a class is not retracted, and it is the reason for the
+shape of everything below: **plausible-looking wrong output, produced by code that ran
+without error.** Section 4 is a list of those that were real — a mis-attributed embedding
+vector, a locator that lied about the regulation's structure, a metric that could only
+ever print one number. The design of the system, and the disproportionate length of that
+section, follow from the class. The example that opened this document just turned out not
+to be a member of it.
+
+### What was measured
+
+Both indexes built over the 2026-08-01 edition with `text-embedding-3-small` at 1536
+dimensions; ten hand-labelled questions (3.9); k = 5.
+
+| | `fixed` (size 1000 / overlap 200) | `structural` (max_chars 6000) |
+|---|---|---|
+| chunks | 570 | 284 |
+| sections | 126 | 126 |
+| **recall@5** | 10/10 | 10/10 |
+| **recall@1** | **10/10** | **9/10** |
+| **MRR** | **1.000** | **0.950** |
+| distinct sections in top-5 chunks | 2.6 of 5 | 2.9 of 5 |
+
+**On this corpus, with this evaluation set, structure-aware chunking did not improve
+retrieval, and it was marginally worse at rank 1.** That is the result. recall@5 is
+identical and saturated at ceiling. recall@1 falls from 10/10 to 9/10 and MRR from 1.000
+to 0.950 on a single question — *"What identifying information must a bank obtain before
+opening an account?"* — where `structural` ranks § 1010.312 *Identification required.*
+above § 1020.220, 0.6484 to 0.6305.
+
+The remaining arguments for `structural` are real, and **none of them is a recall gain**:
+obligations arrive whole instead of truncated at character 1000 (3.4.2); the locator
+printed with a citation is a true statement about the regulation's structure rather than a
+window index (4.3); fewer fragments of one long section crowd the ranking (2.6 → 2.9
+distinct sections); 284 chunks cost half of 570 to embed and store; and, on the MSB
+question above, it clears the stray bank section out of the results list where `fixed`
+leaves it at rank 5. That last one is the entity-ambiguity defence working as designed,
+and it is worth being clear that **no number in the table below moves when it does** —
+recall@5, recall@1 and MRR are all already satisfied by rank 1, so an improvement at rank
+5 is invisible to every metric this harness reports. Those are claims
+about the quality and the honesty of what a correct retrieval hands a user. They are not
+evidence that it retrieves correctly more often, and this evaluation provides none.
+
+**The one regression has a mechanical explanation, and it is not about structure.**
+§ 1020.220 is 12,202 characters. `structural` splits it into four paragraph chunks of
+6000, 5473, 573 and 354 characters, so the sentences answering the question sit inside a
+6000-character chunk beside several thousand characters of adjacent obligation. `fixed`
+puts those same sentences in a 1000-character window that is almost nothing else, and
+that window scores 0.7343 — against `structural`'s best 0.6305 on the same section.
+§ 1010.312 is 1,598 characters, survives as one whole chunk, and is entirely about
+recording a customer's name and address; under `structural` it wins by dilution of its
+rival rather than on the merits. **Near the top of a ranking, chunk size dominates chunk
+boundaries.** The 6000-character cap was chosen to keep obligations intact and to sit
+inside the model's token limit (3.4.2); nothing measured it against retrieval, and this
+is the first evidence of what it costs.
 
 ### Scope
 
 Parts 1010, 1020, and 1022 as of the 2026-08-01 edition: 126 numbered sections, of which
 117 carry text and 9 are `[Reserved]` placeholders that both chunkers skip. That is a
-deliberately small corpus. It is large enough to contain the ambiguity that matters and
-small enough that you can read a section by hand to check whether a retrieval was right —
-which is the only way to build a trustworthy evaluation set.
+deliberately small corpus. It contains the near-duplicate sections the entity-ambiguity
+argument was built on, and it is small enough that you can read a section by hand to check
+whether a retrieval was right — which is the only way to build a trustworthy evaluation
+set. Whether it is large enough to make two chunking strategies *distinguishable* is a
+separate question, and the answer measured above is no; that is 4.8.
 
-**One thing this document does not contain: a recall number.** The embedding API key has
-had no quota, so `evaluate.py` has only ever run against stub vectors. Every statement
-below about *what the system retrieves* is a prediction from the mechanism, and is marked
-as one. Statements about what the code does, what the corpus contains, and what the
-chunkers emit are measured against the cached corpus and are not predictions.
+Earlier drafts of this document carried no recall number at all — the embedding key had
+no quota, and `evaluate.py` had only ever run against stub vectors. That is no longer
+true: the table above is measured, on both indexes, with the real model. Where a
+statement below is still a prediction from the mechanism rather than a measurement, it
+says so. Where a prediction has since been measured and found wrong, it is marked wrong
+in place rather than quietly deleted — 3.4.2, 4.4 and 4.8 are the three that matter, and
+those paragraphs are the most useful ones here.
 
 ---
 
@@ -468,11 +594,38 @@ qualifies it.
 Two changes, and both are necessary. Either one alone leaves the failure in place.
 
 **Change one: carry the heading path into the embedded text.** Every chunk of § 1022.320,
-including the twelfth fragment of paragraph (d), has "Money Services Businesses" in its
-vector. The near-identical boilerplate now lands in a different neighbourhood of the
-embedding space from part 1020's copy of it. This is the intended fix for the failure in
-section 1, and — like that failure — it is reasoning about the vectors, not a measured
-recall gain.
+including the seventh, has "Money Services Businesses" in its vector. The near-identical
+boilerplate lands in a different neighbourhood of the embedding space from part 1020's
+copy of it.
+
+**This was written as the fix for the failure in section 1, and the failure it was aimed
+at is much smaller than section 1 originally claimed.** `fixed` already returns § 1022.320
+at rank 1 for the MSB question carrying no heading path at all, because the regulation
+names its own regulated entity in all twelve of that section's windows. At the top of the
+ranking, where the answer is decided, the heading path is redundant with the body text.
+
+**Where it does still work is further down the list.** `fixed` leaves § 1020.320 — a
+passage about a *bank's* SAR retention — at rank 5 of the collapsed results for the MSB
+question. `structural` returns five part-1022 sections and no bank section at all. That is
+this change doing precisely what it was designed to do, measured rather than reasoned: the
+part heading in the vector is what pushes the 1020 boilerplate below the 1022 boilerplate
+once the correct section has been deduplicated to a single entry.
+
+It is a smaller prize than advertised, and it costs nothing to be exact about the size.
+The claim was that this change decides the *answer*; what it decides is the *tail of the
+results list*. Since rank 1 was already correct without it, **no metric in the harness
+moves** — recall@5, recall@1 and MRR are all settled by the first entry, which is why
+section 1 reports a null result while this paragraph reports a real effect. Those are
+consistent, and the reason they are consistent is that the evaluation cannot see below the
+first hit (4.8).
+
+Two further reasons the mechanism stays, independent of any of that. It is what makes a
+chunk's *printed* context true — a result listing that shows `31 CFR 1022.320 — Rules for
+Money Services Businesses — … — paragraph (d)` tells a compliance officer where they are,
+and `fixed` prints `(no heading in the embedded text)` (3.8). And within a section it is
+the only thing distinguishing one fragment from another, which is the crowding defence
+discussed below. What is retracted is the claim that this change is what stands between
+the user and a $5,000 answer to a $2,000 question. Keep the mechanism; shrink the claim.
 
 **Change two: split at top-level paragraph boundaries, not character offsets.** CFR
 sections are numbered down to `(a)(2)(i)(A)(1)`. The outermost level — `(a)`, `(b)`,
@@ -718,11 +871,17 @@ class IndexHeader(BaseModel):
 ```
 
 An index is a derived artifact, and a derived artifact without its inputs recorded is a
-number you cannot reason about. Take a hypothetical score — no recall has been measured on
-this corpus, see the note in section 1. "recall@5 was 8/10" is not a result; "recall@5 was
-8/10 over 284 chunks from 117 sections of the 2026-08-01 edition, chunked structurally at
-a 6000-character cap, embedded with text-embedding-3-small at 1536 dimensions" is a
-result, because it can be compared to another one and you can see what changed.
+number you cannot reason about. Take this document's own headline figure. "recall@1 was
+9/10" is not a result; "recall@1 was 9/10 over 284 chunks from 126 sections of the
+2026-08-01 edition, chunked structurally at a 6000-character cap, embedded with
+text-embedding-3-small at 1536 dimensions" is a result, because it can be compared to
+another one and you can see what changed.
+
+That comparison is the whole of section 1. Set it beside "10/10 over 570 chunks from the
+same 126 sections at a 1000-character cap, same model, same dimensions" and the two
+differing fields — the chunker and its cap — are the entire space of explanations for the
+gap. Without the header you would have two numbers and a memory of how you produced
+them.
 
 `evaluate.py` prints the header fields alongside its scores for exactly this reason. If
 you take one habit from this codebase into your next project, make it this one: **the
@@ -900,11 +1059,35 @@ one "correct" section would count a correct retrieval as a miss and push you to
 over-tune. `frozenset` makes the multi-answer case the default shape rather than a special
 case.
 
-`evaluate.py` reports **recall@5** — did any acceptable section appear in the top five —
-and **distinct sections in the top 5 chunks**, measured on `rank_chunks` before the
-collapse. It prints both the collapsed list and the raw chunk ranking for every question,
-hit or miss, so neither number becomes a substitute for looking. The second metric used to
-be measured after the collapse, where it could only ever report 5.0; see 4.4.
+`evaluate.py` reports four numbers. **recall@5** — did any acceptable section appear in
+the top five. **recall@1** — was the *first* result acceptable. **MRR** — the mean
+reciprocal rank of the first acceptable section, zero where none appears in the top five.
+And **distinct sections in the top 5 chunks**, measured on `rank_chunks` before the
+collapse.
+
+recall@1 and MRR were added after the first run against real embeddings, for a reason
+worth stating plainly: recall@5 came back **10/10 for both strategies** and could not tell
+them apart. A saturated metric is not a good result, it is an exhausted one — it has no
+remaining capacity to discriminate between the things you are comparing, and reporting it
+alone would have let "both strategies score perfectly" stand in for "this evaluation
+cannot distinguish them." recall@1 is the same question with the tolerance removed. MRR is
+rank-sensitive where recall@5 is a step function, so a correct answer sliding from first
+to third is visible in it and nowhere else. Both are measured on the collapsed list a user
+actually sees; at rank 1 the collapsed and raw rankings agree by construction — the
+best-scoring chunk overall heads both — so recall@1 is not an artefact of the collapse.
+
+**Adding metrics after seeing a result is a genuine hazard**, and it is one move away from
+adding metrics until one of them flatters the answer you wanted. Three things keep it
+honest here. Both metrics were specified before they were computed. Neither a question nor
+an expectation set was touched — tuning the *set* to move a number is the version of this
+that cannot be recovered from. And the metric that moved moved *against* the strategy this
+project was built to advocate. A metric added after the fact is trustworthy exactly to the
+degree that you would have published it had it gone the other way.
+
+`evaluate` prints the collapsed list, the raw chunk ranking, and the rank of the first hit
+for every question, hit or miss, so that no number becomes a substitute for looking. The
+diversity metric used to be measured after the collapse, where it could only ever report
+5.0; see 4.4.
 
 ---
 
@@ -1086,9 +1269,11 @@ because a run that skips `b` is not `a, b, c, …`.
 #### Why neither announced itself
 
 The chunks were still real regulation text. They still carried the correct section, part,
-and citation — so the entity-ambiguity defence in section 3.4.2 still worked. The damage
-was to *which* passage inside the right section came back, and to the truth of a locator.
-Both are invisible unless you read the locator against the source.
+and citation, so retrieval kept landing on the right *section* throughout — which is the
+only thing recall@5 or recall@1 can see. The damage was to *which* passage inside the
+right section came back, and to the truth of a locator. Both are invisible unless you read
+the locator against the source, and neither would have moved a single number in section
+1's table.
 
 **How you would find it yourself:** print the histogram. Any time you infer structure with
 a regular expression, tabulate what it actually matched across the whole corpus and look
@@ -1278,12 +1463,34 @@ once.
 
 `search()` itself is unchanged, and so is what every existing caller receives.
 
-**Confirming it can move.** With no API quota the check ran against a deterministic
-bag-of-words stub embedder — *not* the real model, and not a retrieval-quality result. It
-establishes only that the metric is no longer constant: the new metric reported 3.0 for
-`fixed` and 3.7 for `structural`, where the old one reported 5.0 for both. The direction
-is the expected one, since `fixed` emits more fragments per section for a long section to
-crowd the list with.
+**Confirming it can move.** With no API quota at the time, the check ran against a
+deterministic bag-of-words stub embedder — *not* the real model, and not a
+retrieval-quality result. It established only that the metric was no longer constant: 3.0
+for `fixed` and 3.7 for `structural`, where the old one reported 5.0 for both.
+
+**The real embeddings have since been run, and the stub was right about direction and
+wrong about magnitude.**
+
+| | stub embedder | measured |
+|---|---|---|
+| `fixed` | 3.0 | **2.6** |
+| `structural` | 3.7 | **2.9** |
+| gap | 0.7 | **0.3** |
+
+The sign held: `structural` does surface more distinct sections, for the predicted reason
+— `fixed` emits more fragments per section, so a long section has more pieces with which
+to crowd the list. The size did not hold. The stub overstated both arms and more than
+doubled the gap between them, so any threshold set on 3.0-versus-3.7 would have been set
+in the wrong place, and "structural finds nearly four distinct sections out of five" was
+never true.
+
+That is the right amount of trust to place in a stub, and it generalises: **a stub
+embedder can tell you a metric is alive and which way it points; it cannot tell you how
+big anything is.** Bag-of-words overlap and a trained embedding model do not fail in the
+same places, and a difference between two chunking strategies is a second-order quantity
+of exactly the kind where they diverge. Use a stub to prove a measurement is not constant
+— which was this one's entire job, and it did it — and re-run on the real model before
+quoting a figure to anyone.
 
 ### 4.5 The corpus asymmetry between the two chunkers — FIXED
 
@@ -1363,6 +1570,78 @@ lines. Stated here as an honest gap rather than a design.
   whole check runnable with no API key — the reason it could verify 4.3's fix at all — at
   the cost of a few seconds.
 
+### 4.8 What this evaluation cannot show — OPEN
+
+Not a bug and not fixed. This is the standing limitation of the measurement in section 1,
+written down so the null result is not read as more than it is.
+
+Ten questions, each naming its own regulated entity, over 117 sections carrying text,
+scored at k = 5. Before concluding "structure-aware chunking does not help retrieval,"
+be exact about what that set is unable to detect.
+
+**recall@5 is saturated.** Both strategies answer 10 of 10. A metric both arms max out
+cannot rank them; the only information left in it is that neither is catastrophically
+broken. It stays in the output because a drop below 10/10 would mean something, but it
+cannot be the headline, and the run that produced it is the reason recall@1 and MRR now
+exist (3.9).
+
+**k = 5 over 117 sections is a wide net.** Five slots from 117 candidates, for questions
+whose answers are sections the questions were written to describe, is not a demanding
+test. Most of the retrieval budget is spent before the chunker matters.
+
+**Every question uses the regulation's own term for the entity.** "money services
+business" and "bank" — the exact strings that appear in the target bodies 36 and 42 times
+(section 1). This is the flaw that matters most, because it disables the specific thing
+the project set out to test: **a question set that hands over the disambiguating token
+cannot measure disambiguation.** The set does not merely fail to find the entity-ambiguity
+failure; it is constructed so that the failure cannot arise at the rank that is scored.
+Section 1 found the predicted confusion alive at rank 5 under `fixed` and absent under
+`structural` — a real difference between the two strategies, on the exact axis the project
+was built to test, that every metric here is blind to because rank 1 was already a hit.
+
+**No metric here looks below the first hit.** recall@1, recall@5 and MRR are all settled
+the moment an acceptable section appears; nothing scores what occupies the remaining
+slots. Section 1 turned up a real, measured difference living entirely in that blind spot
+— `fixed` leaves a bank section at rank 5 of the MSB results, `structural` does not — and
+the harness reports identical recall@5 for both. **A metric that stops at the first hit
+cannot evaluate a results list, only a lookup.** Precision@5 against the expectation sets,
+or simply counting off-entity sections in the returned list, would see it. Neither is
+implemented, and the gap between "answers the question" and "returns a clean list" is
+currently unmeasured.
+
+**The two strategies differ in more than one variable.** `structural` changes chunk
+boundaries, *and* prepends the heading path, *and* raises the effective size cap from 1000
+to 6000 characters. Section 1's single regression traced to the third of those. No number
+here attributes anything to one change. An ablation would — the heading path bolted onto
+the fixed chunker, or `structural` re-run at a 1000-character cap — and none has been run.
+
+**Ten questions make the scoreboard coarse.** One flipped rank is a tenth of recall@1 and
+0.05 of MRR. The gap this evaluation reports between the strategies *is* one question.
+Nothing here separates that from noise, and with n = 10 nothing could.
+
+#### What a harder set would need
+
+*Queries that identify the entity indirectly*, in the words a user brings rather than the
+words the regulation uses: "a check casher", "a currency dealer", "a business that wires
+money overseas", "a prepaid access provider". None of those is the phrase "money services
+business"; each resolves to part 1022 only through the definitions in § 1010.100. That is
+the question shape the entity-ambiguity hypothesis was actually about, and the current set
+substituted the easy version of it without anyone noticing — which is why the hypothesis
+went untested for an entire build while appearing to be the point of the project.
+
+*k = 1 or MRR as the headline*, with recall@5 kept only as a floor.
+
+*Enough questions that one flipped rank is not a tenth of the score*, and a meaningful
+share of them adversarial by construction — pairs that differ only in the regulated
+entity, where returning the 1020 answer to the 1022 question is the scored failure.
+
+**This is named, not built.** Writing it means reading § 1010.100's definitions and
+hand-labelling every question against the corpus to the standard 3.9 sets out, *before*
+looking at either ranking — a set written after seeing the output is a description of the
+current system rather than a test of it. It is the next piece of work on the evaluation
+harness, and it is scoped here rather than done here, because doing it inside the same
+change that reported the null result would make the two impossible to tell apart.
+
 ---
 
 ## 5. Where a reasonable engineer would have chosen differently
@@ -1401,9 +1680,20 @@ In a service codebase, delete it and put the equivalence in a comment.
 Irrelevant at 284 vectors, and the simpler code is easier to read. Revisit at 100k.
 
 **Both chunking strategies in the shipped code.** A product would pick the winner and
-delete the loser. Here the comparison is the deliverable — but be clear-eyed that this
-doubles the index-building cost and the surface area, and that a reader who does not know
-why `fixed` exists will eventually delete it.
+delete the loser. There is no winner: section 1 measures recall@5 identical, recall@1 and
+MRR marginally in favour of `fixed`, and the arguments for `structural` are about the
+quality of a correct answer rather than the rate of one. Here the comparison is the
+deliverable and both stay — but be clear-eyed that it doubles the index-building cost and
+the surface area, and that a reader who does not know why `fixed` exists will eventually
+delete it.
+
+**The 6000-character cap was never tuned.** It was picked to keep obligations intact
+while sitting well inside the model's 8192-token input limit (3.4.2) — both good reasons,
+neither of them about retrieval. Section 1's one regression is a dilution effect from
+precisely that cap. The obvious next experiment is `structural` at a smaller cap, which
+would keep paragraph boundaries and the heading path while giving up the "a section that
+fits should not be split" principle for long sections. It has not been run, and until it
+is, the cap is a design choice with one piece of evidence against it and none for it.
 
 **Two providers.** The system talks to OpenAI for embeddings because Anthropic does not
 serve an embedding model. That is a hard constraint, not a preference, but it is worth
@@ -1418,8 +1708,9 @@ Ordered, hardest last. Each is completable from this document alone.
 
 ### Exercise 1 — Make the silent failure visible (30 minutes)
 
-Note that no recall number has ever been produced for this corpus (section 1), so this
-exercise generates the first one. Build both indexes and run the evaluation over each:
+The measured results are in section 1. This exercise reproduces them, and its value is in
+where your expectations disagree with what comes back. Build both indexes and run the
+evaluation over each:
 
 ```
 uv run --env-file .env index.py fixed
@@ -1432,10 +1723,28 @@ Then run the two SAR questions through `search.py` against each index and read t
 with your own eyes.
 
 Write down: which sections does `fixed` return for the MSB question, and what heading path
-does it print? Explain, without re-reading section 1, why the middle windows of § 1020.320
-and § 1022.320 are close together in the embedding space. Then predict what would happen to
-`structural`'s recall if you changed only `Chunk.embed_text` to return `self.body` — and
-run it to check.
+does it print?
+
+Now the part that matters. **Before checking, predict how many of § 1022.320's twelve
+fixed-size windows contain the phrase "money services business."** Commit to a number, then
+count them:
+
+```
+uv run python -c "
+from ecfr import load_sections
+from chunking import fixed_size
+ws = [c for c in fixed_size(load_sections()) if c.section_number == '1022.320']
+print(sum('money services business' in c.body.lower() for c in ws), 'of', len(ws))"
+```
+
+Section 1 of this document got that prediction wrong, and stayed wrong through a build and
+an audit, because nobody ran the three lines above. Getting it wrong yourself is the
+fastest route to the only lesson in it: an assumption about what a corpus contains is
+checkable in seconds, and an unchecked one can sit at the head of a design document
+determining what gets built.
+
+Then predict what would happen to `structural`'s recall if you changed only
+`Chunk.embed_text` to return `self.body` — and run it to check.
 
 ### Exercise 2 — Break each invariant and watch nothing fail (1 hour)
 
@@ -1508,6 +1817,12 @@ new one does not move at all, because it never depended on the collapse.
 That last result is the whole argument: the old metric was measuring the dedupe, not the
 chunking. Write down, in two sentences, why a metric that tracks a guarantee you already
 enforce is worse than printing nothing.
+
+Finally, compare your stub's two numbers against the measured ones in 4.4 — 2.6 and 2.9.
+The stub used when this fix landed reported 3.0 and 3.7: right about which strategy is
+higher, wrong about both values and more than double on the gap. Note how far yours lands,
+and treat that distance as the standing discount on every number a stub embedder gives
+you.
 
 ### Exercise 6 — Rebuild the loader from a blank file (4–6 hours)
 
