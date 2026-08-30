@@ -12,6 +12,13 @@ uv run --env-file .env evaluate.py structural
 uv run --env-file .env search.py "What is the SAR filing threshold for a bank?" structural
 ```
 
+Two checks run offline against the cached corpus, and exit non-zero on failure:
+
+```
+uv run check_labels.py          # the paragraph locators the structural chunker infers
+uv run python -m doctest similarity.py   # the dot product equals the spelled-out cosine
+```
+
 ## Notes
 
 **Sections loaded in reverse order within each subpart.** `ecfr._walk_sections`

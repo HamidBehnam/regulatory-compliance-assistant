@@ -40,12 +40,12 @@ def load_sections() -> list[Section]:
 
     sections: list[Section] = []
     for part in PARTS:
-        parsed = _parse_part(_fetch_part(part), part=part)
         if part not in expected:
             raise EcfrError(
                 f"part {part} is not in the {SNAPSHOT_DATE} structure for "
                 f"title {CFR_TITLE}; check the part number"
             )
+        parsed = _parse_part(_fetch_part(part), part=part)
         if len(parsed) != expected[part]:
             raise EcfrError(
                 f"part {part}: the structure tree lists {expected[part]} sections "
@@ -118,11 +118,15 @@ def _parse_part(xml: str, *, part: str) -> list[Section]:
     part_element = next((e for e in root.iter(_PART_TAG) if e.get("N") == part), None)
     if part_element is None:
         raise EcfrError(f"no PART element for {part} in the response")
+    # Part headings are upper-case in the source; subpart headings are already
+    # mixed-case, so only the former needs normalizing.
     part_heading = _title_case(_heading_name(_head_of(part_element)))
 
     sections: list[Section] = []
     for subpart_heading, element in _walk_sections(part_element):
-        number = element.get("N", "")
+        number = element.get("N")
+        if number is None:
+            raise EcfrError(f"a section in part {part} carries no number attribute")
         metadata = json.loads(element.get("hierarchy_metadata") or "{}")
         path = metadata.get("path", "")
         sections.append(
@@ -216,10 +220,9 @@ def _title_case(heading: str) -> str:
     Part headings are upper-case in the source, and this one is both embedded
     as part of every chunk's heading path and printed in search results.
     """
-    words = heading.title().split()
-    return " ".join(
-        word
-        if index == 0 or word.lower() not in _LOWERCASE_UNLESS_FIRST
-        else word.lower()
-        for index, word in enumerate(words)
-    )
+    words = []
+    for index, word in enumerate(heading.title().split()):
+        if index > 0 and word.lower() in _LOWERCASE_UNLESS_FIRST:
+            word = word.lower()
+        words.append(word)
+    return " ".join(words)

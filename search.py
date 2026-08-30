@@ -16,11 +16,10 @@ from store import InMemoryStore, SearchResult, index_path
 _BODY_PREVIEW_CHARS = 320
 
 
-def search(
-    store: InMemoryStore, query: str, *, top_k: int = TOP_K
-) -> list[SearchResult]:
-    """Return the chunks closest to ``query``, best first."""
-    return store.search(normalize(embed([query])[0]), top_k=top_k)
+def embed_query(query: str) -> list[float]:
+    """Embed a question the way the corpus was embedded: same model, same
+    normalization, so the store's dot product is exact cosine similarity."""
+    return normalize(embed([query])[0])
 
 
 def format_result(result: SearchResult, *, position: int) -> str:
@@ -49,7 +48,8 @@ def main(argv: list[str]) -> int:
 
     store = InMemoryStore.load(index_path(strategy))
     print(f'query: "{query}"   index: {strategy}   top {top_k}\n')
-    for position, result in enumerate(search(store, query, top_k=top_k), start=1):
+    results = store.search(embed_query(query), top_k=top_k)
+    for position, result in enumerate(results, start=1):
         print(format_result(result, position=position))
     return 0
 

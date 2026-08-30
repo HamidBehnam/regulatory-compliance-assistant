@@ -9,15 +9,17 @@ reading does not:
 
 **recall@5** — did any acceptable section appear in the top five?
 
-**distinct sections in top 5** — how much of the list is separate sections
-rather than fragments of one section shouting over the others.
+**distinct sections in the top 5 chunks** — how much of the raw ranking is
+separate sections rather than fragments of one section shouting over the
+others. Measured on `rank_chunks`, before `search` collapses to one chunk per
+section: measured after, it would be 5.0 for every question by construction.
 """
 
 import sys
 
 from config import TOP_K
 from questions import QUESTIONS
-from search import search
+from search import embed_query
 from store import InMemoryStore, index_path
 
 
@@ -32,17 +34,27 @@ def evaluate(strategy: str) -> None:
     hits = 0
     distinct_total = 0
     for question, acceptable in QUESTIONS:
-        retrieved = [r.chunk.section_number for r in search(store, question)]
+        # One embedding, both rankings: the collapsed list is what a user sees,
+        # the raw one is what the diversity number has to be measured on.
+        vector = embed_query(question)
+        retrieved = [r.chunk.section_number for r in store.search(vector, top_k=TOP_K)]
+        ranked = [
+            r.chunk.section_number for r in store.rank_chunks(vector, top_k=TOP_K)
+        ]
         hit = bool(acceptable.intersection(retrieved))
         hits += hit
-        distinct_total += len(set(retrieved))
+        distinct_total += len(set(ranked))
 
         print(f"{'HIT ' if hit else 'MISS'} {question}")
         print(f"     wanted any of: {', '.join(sorted(acceptable))}")
-        print(f"     got:           {', '.join(retrieved)}\n")
+        print(f"     got:           {', '.join(retrieved)}")
+        print(f"     raw chunks:    {', '.join(ranked)}\n")
 
     print(f"recall@{TOP_K}: {hits}/{len(QUESTIONS)}")
-    print(f"distinct sections in top {TOP_K}: {distinct_total / len(QUESTIONS):.1f}")
+    print(
+        f"distinct sections in the top {TOP_K} chunks: "
+        f"{distinct_total / len(QUESTIONS):.1f} of {TOP_K}"
+    )
 
 
 def main(argv: list[str]) -> int:

@@ -25,7 +25,16 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
 
 def normalize(vector: list[float]) -> list[float]:
     """Scale to unit length at index time, which is what lets the query path
-    drop the denominator above and score the corpus with one matrix multiply."""
+    drop the denominator above and score the corpus with one matrix multiply.
+
+    That substitution is the whole reason `store` may use a bare dot product,
+    so it is asserted here rather than only claimed:
+
+    >>> left, right = [3.0, 1.0, 0.0], [1.0, 2.0, 2.0]
+    >>> dot = float(np.dot(normalize(left), normalize(right)))
+    >>> abs(dot - cosine_similarity(left, right)) < 1e-6
+    True
+    """
     array = np.asarray(vector, dtype=np.float32)
     magnitude = float(np.linalg.norm(array))
     return array.tolist() if magnitude == 0.0 else (array / magnitude).tolist()

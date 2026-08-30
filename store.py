@@ -65,16 +65,8 @@ class InMemoryStore:
         corpus most correct answers live in short sections that would lose
         that fight.
         """
-        # An empty candidate set is an ordinary result, not a shape error.
-        if not self.chunks:
-            return []
-
-        # Every stored vector was unit-normalized at index time, so
-        # `similarity.cosine_similarity` reduces to a dot product here and one
-        # matrix multiply scores the whole corpus at once.
-        scores = self._matrix @ np.asarray(query_vector, dtype=np.float32)
-
         results: list[SearchResult] = []
+        scores = self._scores(query_vector)
         seen: set[str] = set()
         for position in np.argsort(-scores):
             chunk = self.chunks[position].chunk
@@ -85,6 +77,35 @@ class InMemoryStore:
             if len(results) == top_k:
                 break
         return results
+
+    def rank_chunks(
+        self, query_vector: list[float], *, top_k: int
+    ) -> list[SearchResult]:
+        """Return the top ``top_k`` chunks, without collapsing to one per section.
+
+        This is the ranking `search` filters, exposed so `evaluate` can measure
+        how many distinct sections the retrieval actually found. Measuring that
+        on `search`'s output cannot work: it dedupes by section, so the count is
+        `top_k` by construction and the number can never move.
+        """
+        scores = self._scores(query_vector)
+        return [
+            SearchResult(
+                chunk=self.chunks[position].chunk, score=float(scores[position])
+            )
+            for position in np.argsort(-scores)[:top_k]
+        ]
+
+    def _scores(self, query_vector: list[float]) -> np.ndarray:
+        """Cosine similarity against every stored chunk.
+
+        Every stored vector was unit-normalized at index time, so
+        `similarity.cosine_similarity` reduces to a dot product here and one
+        matrix multiply scores the whole corpus at once.
+        """
+        # An empty candidate set is an ordinary result, not a shape error: the
+        # zero-row matrix multiplies cleanly and both callers return nothing.
+        return self._matrix @ np.asarray(query_vector, dtype=np.float32)
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
